@@ -5,5 +5,8 @@ let
     python3Packages = nixpkgs.python38Packages;
     which = nixpkgs.which;
   };
-  shell = nixpkgs.mkShell { nativeBuildInputs = [ zuul ]; };
+  nodepool = nixpkgs.callPackage ./nodepool.nix {
+    python3Packages = nixpkgs.python38Packages;
+  };
+  shell = nixpkgs.mkShell { nativeBuildInputs = [ zuul nodepool ]; };
 in if nixpkgs.lib.inNixShell then shell else zuul
