@@ -29,3 +29,11 @@ Ssh vm:
 ```
 ssh root@localhost -p 2221 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
 ```
+
+
+Build container:
+
+```
+nix-build ./container.nix
+podman load -i ./result
+```
