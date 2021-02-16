@@ -21,7 +21,7 @@ nix-build vm.nix -A vm --arg configuration ./configuration.nix
 Run vm:
 
 ```
-QEMU_OPTS=-nographic QEMU_NET_OPTS=hostfwd=tcp::2221-:22 ./result/bin/run-vm1-vm
+QEMU_OPTS=-nographic QEMU_NET_OPTS=hostfwd=tcp::2221-:22 ./result/bin/run-zuul-integration-vm
 ```
 
 Ssh vm:
