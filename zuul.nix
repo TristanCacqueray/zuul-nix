@@ -26,6 +26,7 @@ python3Packages.buildPythonApplication rec {
     extras
     statsd
     voluptuous
+    psycopg2
     (import ./requirements/prettytable.nix { inherit python3Packages; })
     Babel
     netaddr
