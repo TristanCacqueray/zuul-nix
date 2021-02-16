@@ -1,0 +1,33 @@
+From 1f4f2b0e169f293e067c3d8afbfee2e10f79933f Mon Sep 17 00:00:00 2001
+From: Tristan Cacqueray <tdecacqu@redhat.com>
+Date: Tue, 16 Feb 2021 22:08:37 +0000
+Subject: [PATCH] ansible: ensure we can delete ansible files
+
+If the source file modes are non writtable, then copytree/rmtree
+fails with a PermissionError. This change ensures the files
+are writtable before removing them.
+
+Change-Id: I2b07ddc5ee203e7e4077b58224469fed916dabf6
+---
+ zuul/lib/ansible.py | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/zuul/lib/ansible.py b/zuul/lib/ansible.py
+index f4b8fdd9..3ecf7e3a 100644
+--- a/zuul/lib/ansible.py
++++ b/zuul/lib/ansible.py
+@@ -321,6 +321,11 @@ class AnsibleManager:
+ 
+     def copyAnsibleFiles(self):
+         if os.path.exists(self.zuul_ansible_dir):
++            # Ensure we can delete the file
++            for dirpath, dirnames, filenames in os.walk(self.zuul_ansible_dir):
++                os.chmod(dirpath, 0o755)
++                for filename in filenames:
++                    os.chmod(os.path.join(dirpath, filename), 0o600)
+             shutil.rmtree(self.zuul_ansible_dir)
+ 
+         library_path = os.path.dirname(os.path.abspath(zuul.ansible.__file__))
+-- 
+2.30.0
+

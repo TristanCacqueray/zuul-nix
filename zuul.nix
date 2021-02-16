@@ -12,6 +12,8 @@ python3Packages.buildPythonApplication rec {
 
   };
   doCheck = false;
+  # fix ansible library mode so that shutil can remove them after copy
+  patches = [ ./0001-ansible-ensure-we-can-delete-ansible-files.patch ];
   propagatedBuildInputs = with python3Packages; [
     pbr
     pathspec

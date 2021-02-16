@@ -1,12 +1,16 @@
 { config, lib, ... }:
 let
   nixpkgs = import ./nixpkgs.nix;
+  pythonPackages = nixpkgs.python38Packages;
+  python = nixpkgs.buildEnv {
+    name = "python-setuptools";
+    paths = [ (nixpkgs.python38.withPackages (ps: with ps; [ setuptools ])) ];
+  };
   zuul = (import ./zuul.nix {
     which = nixpkgs.which;
-    python3Packages = nixpkgs.python38Packages;
+    python3Packages = pythonPackages;
   });
-  nodepool =
-    (import ./nodepool.nix { python3Packages = nixpkgs.python38Packages; });
+  nodepool = (import ./nodepool.nix { python3Packages = pythonPackages; });
 
   mkSystemd = user: name: exec: path:
     let prog = user + "-" + name;
@@ -36,11 +40,20 @@ let
     ${nixpkgs.openssh}/bin/ssh-keygen -t rsa -N "" -f /var/lib/zuul/.ssh/id_rsa || :
     ${nixpkgs.openssh}/bin/ssh-keygen -t rsa -N "" -f /var/lib/nodepool/.ssh/id_rsa || :
     cp /var/lib/nodepool/.ssh/id_rsa.pub /var/lib/zuul-worker/.ssh/authorized_keys
+    cat /var/lib/zuul/.ssh/id_rsa.pub >> /var/lib/zuul-worker/.ssh/authorized_keys
     chown -R zuul /var/lib/zuul
     chown -R zuul-worker /var/lib/zuul-worker
     chown -R nodepool /var/lib/nodepool
     chmod 0700 /var/lib/{zuul,zuul-worker,nodepool}/.ssh
     chmod 0600 /var/lib/zuul-worker/.ssh/authorized_keys
+
+    echo "Fixup bwrap usage"
+    ln -sf /run/current-system/sw/lib /
+    ln -sf /run/current-system/sw/sbin /
+    touch /etc/ld.so.cache
+    ln -s ${nixpkgs.tzdata}/share/zoneinfo/UTC /etc/localtime
+
+    echo "Setup zuul-config"
     ${nixpkgs.git}/bin/git config --global user.name "John Doe"
     ${nixpkgs.git}/bin/git config --global user.email "john@localhost"
     pushd /var/git/zuul-config
@@ -49,8 +62,21 @@ let
       cp /etc/zuul/job.yaml job.yaml
       ${nixpkgs.git}/bin/git add .zuul.yaml job.yaml
       ${nixpkgs.git}/bin/git commit -m"Init zuul-config" || :
-      echo "Zuul is ready to run!"
     popd
+
+    echo "Setup fake zuul ansible"
+    for version in 2.8 2.9; do
+      mkdir -p /var/ansible/$version/bin
+      for tool in $(ls ${nixpkgs.ansible_2_9}/bin/*); do
+          ln -sf $tool /var/ansible/$version/bin/
+      done
+      ln -sf ${nixpkgs.ansible_2_9}/lib/ /var/ansible/$version/
+      ln -sf ${python}/bin/python /var/ansible/$version/bin/
+      echo home = ./bin/ > /var/ansible/$version/pyvenv.cfg
+      echo include-system-site-packages = true >> /var/ansible/$version/pyvenv.cfg
+    done
+
+    echo "Zuul is ready to run!"
   '';
 
   zuul-project-config = ''
@@ -85,10 +111,10 @@ let
   '';
 
   zuul-job = ''
-    - hosts: localhost
+    - hosts: all
       tasks:
         - name: List working directory
-          command: ls -al {{ ansible_user_dir }}
+          command: /run/current-system/sw/bin/ls -la
   '';
 
   zuul-conf = ''
@@ -104,6 +130,12 @@ let
     [scheduler]
     tenant_config=/etc/zuul/main.yaml
 
+    [executor]
+    manage_ansible=false
+    ansible_root=/var/ansible
+    trusted_ro_paths=/nix
+    untrusted_ro_paths=/nix
+
     [connection sqlreporter]
     driver=sql
     dburi=postgresql://postgres:mypassword@127.0.0.1:5432/zuul
@@ -111,12 +143,6 @@ let
     [connection git]
     driver=git
     baseurl=git://localhost:9418/
-  '';
-
-  init-pg = ''
-    ALTER USER postgres WITH PASSWORD 'mypassword';
-    CREATE DATABASE zuul;
-    GRANT ALL PRIVILEGES ON DATABASE zuul TO postgres;
   '';
 
   zuul-tenant = ''
@@ -146,6 +172,8 @@ let
                 labels: local
                 username: zuul-worker
                 max-parallel-jobs: 42
+                host-key-checking: false
+                python-path: ${python}/bin/python
   '';
 
 in {
@@ -169,6 +197,7 @@ in {
     local all all trust
     host all all 127.0.0.1/32 trust
   '';
+  services.postgresql.ensureDatabases = [ "zuul" ];
   services.zookeeper.enable = true;
   services.gitDaemon.enable = true;
   services.gitDaemon.basePath = "/var/git";
@@ -184,16 +213,17 @@ in {
   systemd.services.nodepool-launcher =
     mkSystemd "nodepool" "launcher" "${nodepool}/bin/nodepool-launcher -d" [ ];
   systemd.services.zuul-scheduler =
-    mkSystemd "zuul" "scheduler" "${zuul}/bin/zuul-scheduler -f" [ ];
+    mkSystemd "zuul" "scheduler" "${zuul}/bin/zuul-scheduler -df" [ ];
   systemd.services.zuul-merger =
-    mkSystemd "zuul" "merger" "${zuul}/bin/zuul-merger -f" [
+    mkSystemd "zuul" "merger" "${zuul}/bin/zuul-merger -df" [
       nixpkgs.git
       nixpkgs.openssh
     ];
   systemd.services.zuul-executor =
-    mkSystemd "zuul" "executor" "${zuul}/bin/zuul-executor -f" [
+    mkSystemd "zuul" "executor" "${zuul}/bin/zuul-executor -df" [
       nixpkgs.git
       nixpkgs.openssh
+      nixpkgs.bubblewrap
     ];
   systemd.services.zuul-web =
     mkSystemd "zuul" "web" "${zuul}/bin/zuul-web -f" [ ];
@@ -201,7 +231,15 @@ in {
   # configuration service
   systemd.services.zuul-setup = {
     script = setupScript;
+    before = [
+      "zuul-scheduler.service"
+      "nodepool-launcher.service"
+      "zuul-merger.service"
+      "zuul-executor.service"
+      "zuul-web.service"
+    ];
     wantedBy = [ "multi-user.target" ];
+    serviceConfig.Type = "oneshot";
   };
 
   # configuration
