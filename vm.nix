@@ -10,6 +10,7 @@ rec {
         virtualisation = {
           memorySize = 8192;
           diskSize = 10000;
+          cores = 8;
         };
       })
     ];

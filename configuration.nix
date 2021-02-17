@@ -7,8 +7,15 @@ let
   pythonPackages = nixpkgs.python38Packages;
   python = nixpkgs.buildEnv {
     name = "python-setuptools";
-    paths = [ (nixpkgs.python38.withPackages (ps: with ps; [ setuptools ])) ];
+    paths = [
+      (nixpkgs.python38.withPackages
+        (ps: with ps; [ setuptools paho-mqtt requests ]))
+    ];
   };
+  benchmark = nixpkgs.writeScriptBin "benchmark" (''
+    #!${python}/bin/python
+  '' + builtins.readFile ./benchmark.py);
+
   zuul = (import ./zuul.nix {
     which = nixpkgs.which;
     python3Packages = pythonPackages;
@@ -156,6 +163,7 @@ let
     ansible_root=/var/ansible
     trusted_ro_paths=/nix
     untrusted_ro_paths=/nix
+    load_multiplier=10.0
 
     [connection sqlreporter]
     driver=sql
@@ -307,7 +315,13 @@ in {
   environment.etc."zuul/job.yaml".text = zuul-job;
   environment.etc."nodepool/nodepool.yaml".text = nodepool-conf;
 
-  environment.systemPackages = with nixpkgs; [ nodepool zuul htop git ];
+  environment.systemPackages = with nixpkgs; [
+    nodepool
+    zuul
+    htop
+    git
+    benchmark
+  ];
 
   users.mutableUsers = false;
   users.users.root.password = "";
@@ -320,6 +334,8 @@ in {
     If you are connect via serial console:
     Type Ctrl-a c to switch to the qemu console
     and `quit` to stop the VM.
+
+    Once logged in, type `benchmark`.
   '';
   system.stateVersion = "20.09";
 }
