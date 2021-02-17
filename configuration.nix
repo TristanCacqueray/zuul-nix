@@ -101,10 +101,17 @@ let
         trigger:
           timer:
             - time: '* * * * *'
+        start:
+          mqtt:
+            topic: "zuul/"
         success:
           sqlreporter:
+          mqtt:
+            topic: "zuul/"
         failure:
           sqlreporter:
+          mqtt:
+            topic: "zuul/"
 
     - job:
         name: zuul-job
@@ -151,6 +158,12 @@ let
     [connection sqlreporter]
     driver=sql
     dburi=postgresql://postgres:mypassword@127.0.0.1:5432/zuul
+
+    [connection mqtt]
+    driver=mqtt
+    server=localhost
+    user=zuul
+    password=secret
 
     [connection git]
     driver=git
@@ -216,6 +229,22 @@ in {
   services.gitDaemon.exportAll = true;
   #  services.gerrit.serverId = "f6993d9c-6de6-4d33-be20-c81f4d182eed";
   #  services.gerrit.enable = true;
+
+  # mqtt server
+  services.mosquitto.enable = true;
+  services.mosquitto.users.zuul.password = "secret";
+  services.mosquitto.users.zuul.acl = [ "topic readwrite zuul/#" ];
+  services.mosquitto.allowAnonymous = true;
+  # mqtt client
+  systemd.services.mosquitto_sub = {
+    wantedBy = [ "multi-user.target" ];
+    after = [ "mosquitto.service" ];
+    description = "An mqtt client to dump event";
+    enable = true;
+    serviceConfig.Type = "simple";
+    serviceConfig.ExecStart =
+      "${nixpkgs.mosquitto}/bin/mosquitto_sub -t '#' -u zuul";
+  };
 
   users.users.zuul = mkUser "zuul";
   users.users.zuul-worker = mkUser "zuul-worker";
