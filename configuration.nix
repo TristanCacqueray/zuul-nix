@@ -14,6 +14,8 @@ let
     python3Packages = pythonPackages;
   });
   nodepool = (import ./nodepool.nix { python3Packages = pythonPackages; });
+  zuul-gateway =
+    (import ./zuul-gateway.nix { python3Packages = pythonPackages; });
 
   mkSystemd = user: name: exec: path:
     let prog = user + "-" + name;
@@ -93,14 +95,13 @@ let
 
   zuul-project-config = ''
     - pipeline:
-        name: periodic
-        post-review: true
-        description: Jobs in this queue are triggered every minute.
+        name: check
         manager: independent
-        precedence: low
         trigger:
-          timer:
-            - time: '* * * * *'
+          virtual:
+            - event: pg_pull_request
+              action:
+                - opened
         start:
           mqtt:
             topic: "zuul/"
@@ -124,7 +125,8 @@ let
         run: job.yaml
 
     - project:
-        periodic:
+        name: gateway
+        check:
           jobs:
             - zuul-job
   '';
@@ -168,6 +170,11 @@ let
     [connection git]
     driver=git
     baseurl=git://localhost:9418/
+
+    [connection virtual]
+    driver=pagure
+    server=localhost:5000
+    baseurl=http://localhost:5000
   '';
 
   zuul-tenant = ''
@@ -177,6 +184,9 @@ let
           git:
             config-projects:
               - zuul-config
+          virtual:
+            untrusted-projects:
+              - gateway
   '';
 
   nodepool-conf = ''
@@ -281,6 +291,13 @@ in {
     ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig.Type = "oneshot";
+  };
+  systemd.services.zuul-gateway = {
+    wantedBy = [ "multi-user.target" ];
+    description = "A service to inject zuul event";
+    enable = true;
+    serviceConfig.Type = "simple";
+    serviceConfig.ExecStart = "${zuul-gateway}/bin/zuul-gateway";
   };
 
   # configuration
