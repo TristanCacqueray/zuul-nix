@@ -1,5 +1,8 @@
 { config, lib, ... }:
 let
+  # Set to false to actually run ansible
+  disable-ansible = true;
+
   nixpkgs = import ./nixpkgs.nix;
   pythonPackages = nixpkgs.python38Packages;
   python = nixpkgs.buildEnv {
@@ -32,6 +35,15 @@ let
     home = "/var/lib/" + user;
     description = user + " service account";
   };
+
+  install-ansible = if disable-ansible then ''
+    cat << EOF > /var/ansible/$version/bin/$(basename $tool)
+    #!/bin/sh
+    exit 0
+    EOF
+    chmod +x /var/ansible/$version/bin/$(basename $tool)
+  '' else
+    "ln -sf $tool /var/ansible/$version/bin/";
 
   setupScript = ''
     #!/bin/bash
@@ -68,7 +80,7 @@ let
     for version in 2.8 2.9; do
       mkdir -p /var/ansible/$version/bin
       for tool in $(ls ${nixpkgs.ansible_2_9}/bin/*); do
-          ln -sf $tool /var/ansible/$version/bin/
+          ${install-ansible}
       done
       ln -sf ${nixpkgs.ansible_2_9}/lib/ /var/ansible/$version/
       ln -sf ${python}/bin/python /var/ansible/$version/bin/

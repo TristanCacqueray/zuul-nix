@@ -30,6 +30,11 @@ Ssh vm:
 ssh root@localhost -p 2221 -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
 ```
 
+Remove state overlay:
+
+```
+rm zuul-integration.qcow2
+```
 
 Build container:
 
