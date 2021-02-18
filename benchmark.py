@@ -17,6 +17,9 @@ import json
 import time
 import paho.mqtt.client as mqtt
 import requests
+import select
+import socket
+import threading
 import statistics
 
 
@@ -29,21 +32,59 @@ def on_message(message, measures):
         )
 
 
-def print_summary(measures):
+def on_metric(data, metrics):
+    metric, rest = data.split(":", 1)
+    value, typ = rest.split("|", 1)
+    metric_name = typ + metric
+    if typ == "c":
+        metrics.setdefault(metric_name, 0)
+        metrics[metric_name] += int(1)
+    elif typ == "g":
+        metrics[metric_name] = value
+    elif typ == "ms":
+        metrics.setdefault(metric_name, [])
+        metrics[metric_name].append(value)
+    else:
+        print("Unknown metrics", data)
+
+
+def print_summary(measures, metrics):
     print("Build count :", len(measures))
 
-    def print_benchmark(name, key):
-        xs = list(map(lambda x: x[key], measures.values()))
+    def print_benchmark(name, xs):
         print(
             "%s:" % name,
             "mean",
-            "%.3f" % statistics.mean(xs),
+            "%.5f" % statistics.mean(xs),
             "std dev",
-            "%.3f" % statistics.pstdev(xs),
+            "%.5f" % statistics.pstdev(xs),
         )
 
-    print_benchmark("Enqueue time", "enqueue")
-    print_benchmark("Report time ", "report")
+    def print_measures(name, key):
+        print_benchmark(name, list(map(lambda x: x[key], measures.values())))
+
+    print_measures("Enqueue time     ", "enqueue")
+    print_measures("Report time      ", "report")
+
+    def print_metrics(name, key, subkey):
+        print_benchmark(
+            name,
+            list(
+                map(
+                    lambda metric: float(metric[1]),
+                    filter(
+                        lambda metric: metric[0].endswith(subkey),
+                        map(lambda metric: metric.split(":"), metrics[key]),
+                    ),
+                )
+            ),
+        )
+
+    print_metrics(
+        "Scheduler enqueue",
+        "mszuul.tenant.default.pipeline.check.project.localhost",
+        "enqueue_time",
+    )
 
 
 def usage():
@@ -51,6 +92,28 @@ def usage():
     parser.add_argument("--mqtt", default="localhost")
     parser.add_argument("--count", type=int, default=100)
     return parser.parse_args()
+
+
+def run_statsd(skt, metrics):
+    poll = select.poll()
+    poll.register(skt, select.POLLIN)
+    while metrics["collect"]:
+        if not poll.poll(5):
+            continue
+        pkt = skt.recvfrom(1024)
+        if not pkt:
+            break
+        for metric in pkt[0].strip().decode("utf-8").split("\n"):
+            on_metric(metric, metrics)
+    skt.close()
+
+
+def create_statsd_server(metrics):
+    skt = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    skt.bind(("", 8125))
+    server = threading.Thread(target=run_statsd, args=(skt, metrics))
+    server.start()
+    return server
 
 
 def create_mqtt_client(host, measures):
@@ -88,8 +151,9 @@ def wait_for_zuul():
 def main():
     args = usage()
     wait_for_zuul()
-    measures = dict()
+    measures, metrics = dict(), dict(collect=True)
     client = create_mqtt_client(args.mqtt, measures)
+    server = create_statsd_server(metrics)
     start_time = time.monotonic()
     print("[+] Creating %d jobs..." % args.count)
     for job in range(1, args.count + 1):
@@ -99,12 +163,15 @@ def main():
         elapsed = time.monotonic() - start_time
         count = len(measures)
         if elapsed > 10000 or count >= args.count:
-            print("\nBenchmark  : %d seconds" % elapsed)
+            print("\nBenchmark   : %.2f seconds" % elapsed)
             break
         print("Completed build so far: %d\r" % count, end="")
         time.sleep(1)
     client.loop_stop()
-    print_summary(measures)
+    metrics["collect"] = False
+    server.join()
+    print_summary(measures, metrics)
+    json.dump(metrics, open("/tmp/metrics.json", "w"))
 
 
 if __name__ == "__main__":

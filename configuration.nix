@@ -158,6 +158,9 @@ let
     [scheduler]
     tenant_config=/etc/zuul/main.yaml
 
+    [statsd]
+    server=localhost
+
     [executor]
     manage_ansible=false
     ansible_root=/var/ansible

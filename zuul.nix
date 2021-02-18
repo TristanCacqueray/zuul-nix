@@ -12,8 +12,12 @@ python3Packages.buildPythonApplication rec {
 
   };
   doCheck = false;
-  # fix ansible library mode so that shutil can remove them after copy
-  patches = [ ./0001-ansible-ensure-we-can-delete-ansible-files.patch ];
+  patches = [
+    # https://review.opendev.org/c/zuul/zuul/+/775943
+    ./0001-ansible-ensure-we-can-delete-ansible-files.patch
+    # https://review.opendev.org/c/zuul/zuul/+/776287
+    ./0001-scheduler-add-statsd-metric-for-enqueue-time.patch
+  ];
   propagatedBuildInputs = with python3Packages; [
     pbr
     pathspec
